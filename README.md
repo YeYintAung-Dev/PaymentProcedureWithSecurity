@@ -104,5 +104,85 @@ int affected = await ctx.Database.ExecuteSqlInterpolatedAsync(
 - [SQL Server stored procedure error handling](https://learn.microsoft.com/en-us/sql/relational-databases/stored-procedures/stored-procedures-database-engine)  
 
 ---
+## Stored Procedure
+USE [PaymentDB]
+GO
+/****** Object:  StoredProcedure [dbo].[usp_ProcessPayment]    Script Date: 8/4/2025 10:24:23 AM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+ALTER PROCEDURE [dbo].[usp_ProcessPayment]
+    @FromAccountId INT,
+    @ToAccountId INT,
+    @Amount DECIMAL(18,2)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @caller SYSNAME = ORIGINAL_LOGIN();
+
+    -- Log start
+    INSERT INTO Tbl_PaymentAudit (FromAccountId, ToAccountId, Amount, AttemptedBy, Status)
+    VALUES (@FromAccountId, @ToAccountId, @Amount, @caller, 'Started');
+
+    -- Check caller security
+    IF @caller <> 'PaymentAppLogin'
+    BEGIN
+        INSERT INTO Tbl_PaymentAudit (FromAccountId, ToAccountId, Amount, AttemptedBy, Status)
+        VALUES (@FromAccountId, @ToAccountId, @Amount, @caller, 'Unauthorized');
+
+        RAISERROR('Unauthorized Access', 16, 1);
+        RETURN;
+    END
+
+    -- Validate parameters
+    IF @Amount <= 0 
+       OR NOT EXISTS(SELECT 1 FROM Tbl_Accounts WHERE AccountId = @FromAccountId)
+       OR NOT EXISTS(SELECT 1 FROM Tbl_Accounts WHERE AccountId = @ToAccountId)
+    BEGIN
+        INSERT INTO Tbl_PaymentAudit (FromAccountId, ToAccountId, Amount, AttemptedBy, Status)
+        VALUES (@FromAccountId, @ToAccountId, @Amount, @caller, 'ValidationFailed');
+
+        RAISERROR('Invalid Parameters', 16, 1);
+        RETURN;
+    END
+
+    -- Begin transaction
+    BEGIN TRANSACTION;
+    BEGIN TRY
+        -- Deduct from sender
+        UPDATE Tbl_Accounts 
+        SET Balance = Balance - @Amount 
+        WHERE AccountId = @FromAccountId;
+
+        -- Credit to receiver
+        UPDATE Tbl_Accounts 
+        SET Balance = Balance + @Amount 
+        WHERE AccountId = @ToAccountId;
+
+        -- Log transaction
+        INSERT INTO Tbl_Transactions (FromAccountId, ToAccountId, Amount)
+        VALUES (@FromAccountId, @ToAccountId, @Amount);
+
+        COMMIT TRANSACTION;
+
+        -- Mark success
+        INSERT INTO Tbl_PaymentAudit (FromAccountId, ToAccountId, Amount, AttemptedBy, Status)
+        VALUES (@FromAccountId, @ToAccountId, @Amount, @caller, 'Success');
+    END TRY
+    BEGIN CATCH
+        -- Rollback on error
+        ROLLBACK TRANSACTION;
+
+        -- Log error
+        INSERT INTO Tbl_PaymentAudit (FromAccountId, ToAccountId, Amount, AttemptedBy, Status)
+        VALUES (@FromAccountId, @ToAccountId, @Amount, @caller, 'Error');
+
+        -- Return error
+        DECLARE @msg NVARCHAR(4000) = ERROR_MESSAGE();
+        RAISERROR(@msg, 16, 1);
+    END CATCH;
+END;
+
 
 If you want me to prepare the full `README.md` file text or any additional docs, just ask!
