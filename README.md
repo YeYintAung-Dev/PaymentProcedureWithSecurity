@@ -105,6 +105,7 @@ int affected = await ctx.Database.ExecuteSqlInterpolatedAsync(
 
 ---
 ## Stored Procedure
+```
 USE [PaymentDB]
 GO
 /****** Object:  StoredProcedure [dbo].[usp_ProcessPayment]    Script Date: 8/4/2025 10:24:23 AM ******/
@@ -183,6 +184,7 @@ BEGIN
         RAISERROR(@msg, 16, 1);
     END CATCH;
 END;
+```
 
 
 If you want me to prepare the full `README.md` file text or any additional docs, just ask!
